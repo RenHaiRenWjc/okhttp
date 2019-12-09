@@ -49,12 +49,14 @@ internal class RealCall private constructor(
   // Guarded by this.
   var executed: Boolean = false
 
-  @Synchronized override fun isExecuted(): Boolean = executed
+  @Synchronized
+  override fun isExecuted(): Boolean = executed
 
   override fun isCanceled(): Boolean = transmitter.isCanceled
 
   override fun request(): Request = originalRequest
 
+  // 同步
   override fun execute(): Response {
     synchronized(this) {
       check(!executed) { "Already Executed" }
@@ -70,13 +72,14 @@ internal class RealCall private constructor(
     }
   }
 
+  // 异步
   override fun enqueue(responseCallback: Callback) {
     synchronized(this) {
-      check(!executed) { "Already Executed" }
+      check(!executed) { "Already Executed" }  // 检查是否重复执行
       executed = true
     }
     transmitter.callStart()
-    client.dispatcher.enqueue(AsyncCall(responseCallback))
+    client.dispatcher.enqueue(AsyncCall(responseCallback)) // 调用分发器
   }
 
   override fun cancel() {
@@ -89,11 +92,12 @@ internal class RealCall private constructor(
   override fun clone(): RealCall {
     return newRealCall(client, originalRequest, forWebSocket)
   }
-
+// 实现 Runnable ，线程启动时它时，会执行 run 方法
   internal inner class AsyncCall(
     private val responseCallback: Callback
   ) : Runnable {
-    @Volatile private var callsPerHost = AtomicInteger(0)
+    @Volatile
+    private var callsPerHost = AtomicInteger(0)
 
     fun callsPerHost(): AtomicInteger = callsPerHost
 
@@ -111,7 +115,7 @@ internal class RealCall private constructor(
      * Attempt to enqueue this async call on [executorService]. This will attempt to clean up
      * if the executor has been shut down by reporting the call as failed.
      */
-    fun executeOn(executorService: ExecutorService) {
+    fun executeOn(executorService: ExecutorService) {//重定向到`execute`方法
       client.dispatcher.assertThreadDoesntHoldLock()
 
       var success = false
@@ -135,7 +139,7 @@ internal class RealCall private constructor(
         var signalledCallback = false
         transmitter.timeoutEnter()
         try {
-          val response = getResponseWithInterceptorChain()
+          val response = getResponseWithInterceptorChain()  // 真正的执行请求，返回结果，这才是 okhttp 的核心：拦截器责任链
           signalledCallback = true
           responseCallback.onResponse(this@RealCall, response)
         } catch (e: IOException) {
@@ -154,7 +158,7 @@ internal class RealCall private constructor(
           }
           throw t
         } finally {
-          client.dispatcher.finished(this)
+          client.dispatcher.finished(this)  // 请求完成
         }
       }
     }
@@ -166,8 +170,8 @@ internal class RealCall private constructor(
    */
   fun toLoggableString(): String {
     return ((if (isCanceled()) "canceled " else "") +
-        (if (forWebSocket) "web socket" else "call") +
-        " to " + redactedUrl())
+      (if (forWebSocket) "web socket" else "call") +
+      " to " + redactedUrl())
   }
 
   fun redactedUrl(): String = originalRequest.url.redact()
@@ -187,7 +191,7 @@ internal class RealCall private constructor(
     interceptors += CallServerInterceptor(forWebSocket)
 
     val chain = RealInterceptorChain(interceptors, transmitter, null, 0, originalRequest, this,
-        client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis)
+      client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis)
 
     var calledNoMoreExchanges = false
     try {

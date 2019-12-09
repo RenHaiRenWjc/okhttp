@@ -41,7 +41,7 @@ class Dispatcher constructor() {
    * If more than [maxRequests] requests are in flight when this is invoked, those requests will
    * remain in flight.
    */
-  @get:Synchronized var maxRequests = 64
+  @get:Synchronized var maxRequests = 64  // 异步请求时，最大请求数
     set(maxRequests) {
       require(maxRequests >= 1) { "max < 1: $maxRequests" }
       synchronized(this) {
@@ -60,7 +60,7 @@ class Dispatcher constructor() {
    *
    * WebSocket connections to hosts **do not** count against this limit.
    */
-  @get:Synchronized var maxRequestsPerHost = 5
+  @get:Synchronized var maxRequestsPerHost = 5  // The maximum number of requests for each host to execute concurrently.
     set(maxRequestsPerHost) {
       require(maxRequestsPerHost >= 1) { "max < 1: $maxRequestsPerHost" }
       synchronized(this) {
@@ -82,14 +82,14 @@ class Dispatcher constructor() {
    */
   @set:Synchronized
   @get:Synchronized
-  var idleCallback: Runnable? = null
+  var idleCallback: Runnable? = null  // A callback to be invoked each time the dispatcher becomes idle
 
   private var executorServiceOrNull: ExecutorService? = null
 
   @get:Synchronized
   @get:JvmName("executorService") val executorService: ExecutorService
     get() {
-      if (executorServiceOrNull == null) {
+      if (executorServiceOrNull == null) {// 核心数、最大线程、空闲线程闲置时间、闲置单位、线程等待队列、线程工厂
         executorServiceOrNull = ThreadPoolExecutor(0, Int.MAX_VALUE, 60, TimeUnit.SECONDS,
             SynchronousQueue(), threadFactory("OkHttp Dispatcher", false))
       }
@@ -162,14 +162,16 @@ class Dispatcher constructor() {
     val executableCalls = mutableListOf<AsyncCall>()
     val isRunning: Boolean
     synchronized(this) {
-      val i = readyAsyncCalls.iterator()
+      val i = readyAsyncCalls.iterator() // 迭代器
       while (i.hasNext()) {
         val asyncCall = i.next()
 
-        if (runningAsyncCalls.size >= this.maxRequests) break // Max capacity.
+        if (runningAsyncCalls.size >= this.maxRequests) break // Max capacity.超过运行中最大的请求数
+
+        //  超过同一域名请求；如果不超过则放入执行列表中
         if (asyncCall.callsPerHost().get() >= this.maxRequestsPerHost) continue // Host max capacity.
 
-        i.remove()
+        i.remove() // 从等待中的请求列表删除
         asyncCall.callsPerHost().incrementAndGet()
         executableCalls.add(asyncCall)
         runningAsyncCalls.add(asyncCall)
@@ -179,7 +181,7 @@ class Dispatcher constructor() {
 
     for (i in 0 until executableCalls.size) {
       val asyncCall = executableCalls[i]
-      asyncCall.executeOn(executorService)
+      asyncCall.executeOn(executorService)  // 提交给线程池
     }
 
     return isRunning
@@ -204,11 +206,12 @@ class Dispatcher constructor() {
   private fun <T> finished(calls: Deque<T>, call: T) {
     val idleCallback: Runnable?
     synchronized(this) {
+      // 从请求列表中移除
       if (!calls.remove(call)) throw AssertionError("Call wasn't in-flight!")
       idleCallback = this.idleCallback
     }
 
-    val isRunning = promoteAndExecute()
+    val isRunning = promoteAndExecute() // 异步任务结束后，重新调配请求，把等待中的请求放入执行请求列表中
 
     if (!isRunning && idleCallback != null) {
       idleCallback.run()
